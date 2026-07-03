@@ -1,0 +1,21 @@
+{
+  "daemon": {
+    "interval": "30s",
+    "failure_threshold": 2,
+    "success_threshold": 1
+  },
+  "observability": {
+    "listen_addr": "127.0.0.1:8374",
+    "event_log": "./thirdcupd.events.jsonl",
+    "pretty_logs": false
+  },
+  "checks": {
+    "disk": [
+      {
+        "name": "root-disk",
+        "path": "/",
+        "max_usage_percent": 90
+      }
+    ]
+  }
+}
