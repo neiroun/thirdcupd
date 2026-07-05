@@ -1,0 +1,20 @@
+{
+  "daemon": {
+    "interval": "30s",
+    "failure_threshold": 2,
+    "success_threshold": 1
+  },
+  "observability": {
+    "listen_addr": "0.0.0.0:8374",
+    "event_log": ""
+  },
+  "checks": {
+    "disk": [
+      {
+        "name": "container-root-disk",
+        "path": "/",
+        "max_usage_percent": 95
+      }
+    ]
+  }
+}

@@ -55,3 +55,53 @@ func TestLoadRejectsDuplicateNamesWithinType(t *testing.T) {
 		t.Fatal("expected duplicate name error")
 	}
 }
+
+func TestLoadRejectsInvalidDurations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "thirdcupd.json")
+	data := []byte(`{
+  "checks": {
+    "http": [
+      {
+        "name": "api",
+        "url": "http://127.0.0.1:8080/healthz",
+        "timeout": "-1s"
+      }
+    ]
+  }
+}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected invalid duration error")
+	}
+}
+
+func TestLoadSupportsExpectedHTTPHeaders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "thirdcupd.json")
+	data := []byte(`{
+  "checks": {
+    "http": [
+      {
+        "name": "api",
+        "url": "http://127.0.0.1:8080/healthz",
+        "expected_headers": {
+          "X-Service-Health": "green"
+        }
+      }
+    ]
+  }
+}`)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Checks.HTTP[0].ExpectedHeaders["X-Service-Health"]; got != "green" {
+		t.Fatalf("unexpected expected header: %q", got)
+	}
+}

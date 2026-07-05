@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,12 +57,12 @@ func (s *Server) Run(ctx context.Context) error {
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	snapshot := s.store.Snapshot()
-	if snapshot.Overall != state.StatusHealthy {
-		http.Error(w, snapshot.Overall+"\n", http.StatusServiceUnavailable)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if !probeOK(snapshot) {
+		http.Error(w, snapshot.Overall, http.StatusServiceUnavailable)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	_, _ = w.Write([]byte("ok\n"))
+	_, _ = w.Write([]byte(snapshot.Overall + "\n"))
 }
 
 func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
@@ -78,9 +79,20 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintln(w, "# HELP thirdcupd_overall_status Overall status: 1 healthy, 0 otherwise.")
 	fmt.Fprintln(w, "# TYPE thirdcupd_overall_status gauge")
 	fmt.Fprintf(w, "thirdcupd_overall_status %d\n", boolFloat(snapshot.Overall == state.StatusHealthy))
+	fmt.Fprintln(w, "# HELP thirdcupd_probe_ready Health API result: 1 ready, 0 otherwise.")
+	fmt.Fprintln(w, "# TYPE thirdcupd_probe_ready gauge")
+	fmt.Fprintf(w, "thirdcupd_probe_ready %d\n", boolFloat(probeOK(snapshot)))
 
 	fmt.Fprintln(w, "# HELP thirdcupd_check_status Check status: 1 healthy, 0 otherwise.")
 	fmt.Fprintln(w, "# TYPE thirdcupd_check_status gauge")
+	fmt.Fprintln(w, "# HELP thirdcupd_check_latency_ms Last observed check latency in milliseconds.")
+	fmt.Fprintln(w, "# TYPE thirdcupd_check_latency_ms gauge")
+	fmt.Fprintln(w, "# HELP thirdcupd_check_failures_total Total failed check runs.")
+	fmt.Fprintln(w, "# TYPE thirdcupd_check_failures_total counter")
+	fmt.Fprintln(w, "# HELP thirdcupd_check_runs_total Total check runs.")
+	fmt.Fprintln(w, "# TYPE thirdcupd_check_runs_total counter")
+	fmt.Fprintln(w, "# HELP thirdcupd_check_consecutive_failures Consecutive failed check runs.")
+	fmt.Fprintln(w, "# TYPE thirdcupd_check_consecutive_failures gauge")
 	for _, check := range snapshot.Checks {
 		labels := labels(map[string]string{
 			"name":   check.Name,
@@ -95,6 +107,10 @@ func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
+func probeOK(snapshot state.Snapshot) bool {
+	return snapshot.Overall == state.StatusHealthy || snapshot.Overall == state.StatusDegraded
+}
+
 func boolFloat(value bool) int {
 	if value {
 		return 1
@@ -103,9 +119,15 @@ func boolFloat(value bool) int {
 }
 
 func labels(values map[string]string) string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
 	parts := make([]string, 0, len(values))
-	for key, value := range values {
-		parts = append(parts, key+"="+strconv.Quote(escapeLabel(value)))
+	for _, key := range keys {
+		parts = append(parts, key+"="+strconv.Quote(escapeLabel(values[key])))
 	}
 	return strings.Join(parts, ",")
 }

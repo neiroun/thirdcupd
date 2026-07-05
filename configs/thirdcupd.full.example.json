@@ -1,0 +1,43 @@
+{
+  "daemon": {
+    "interval": "30s",
+    "failure_threshold": 2,
+    "success_threshold": 1
+  },
+  "observability": {
+    "listen_addr": "127.0.0.1:8374",
+    "event_log": "./thirdcupd.events.jsonl"
+  },
+  "checks": {
+    "http": [
+      {
+        "name": "auth-gateway",
+        "url": "http://127.0.0.1:8080/healthz",
+        "method": "GET",
+        "headers": {
+          "User-Agent": "thirdcupd"
+        },
+        "expected_headers": {
+          "X-Service-Health": "green"
+        },
+        "timeout": "3s",
+        "expected_status": [200],
+        "max_latency": "500ms"
+      }
+    ],
+    "tcp": [
+      {
+        "name": "postgres",
+        "address": "127.0.0.1:5432",
+        "timeout": "2s"
+      }
+    ],
+    "disk": [
+      {
+        "name": "root-disk",
+        "path": "/",
+        "max_usage_percent": 90
+      }
+    ]
+  }
+}

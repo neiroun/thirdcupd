@@ -6,8 +6,7 @@
   },
   "observability": {
     "listen_addr": "127.0.0.1:8374",
-    "event_log": "./thirdcupd.events.jsonl",
-    "pretty_logs": false
+    "event_log": ""
   },
   "checks": {
     "disk": [

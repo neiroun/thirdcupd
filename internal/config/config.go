@@ -56,7 +56,6 @@ type DaemonConfig struct {
 type ObservabilityConfig struct {
 	ListenAddr string `json:"listen_addr"`
 	EventLog   string `json:"event_log"`
-	PrettyLogs bool   `json:"pretty_logs"`
 }
 
 type ChecksConfig struct {
@@ -66,13 +65,14 @@ type ChecksConfig struct {
 }
 
 type HTTPCheck struct {
-	Name           string            `json:"name"`
-	URL            string            `json:"url"`
-	Method         string            `json:"method"`
-	Headers        map[string]string `json:"headers"`
-	Timeout        Duration          `json:"timeout"`
-	ExpectedStatus []int             `json:"expected_status"`
-	MaxLatency     Duration          `json:"max_latency"`
+	Name            string            `json:"name"`
+	URL             string            `json:"url"`
+	Method          string            `json:"method"`
+	Headers         map[string]string `json:"headers"`
+	ExpectedHeaders map[string]string `json:"expected_headers"`
+	Timeout         Duration          `json:"timeout"`
+	ExpectedStatus  []int             `json:"expected_status"`
+	MaxLatency      Duration          `json:"max_latency"`
 }
 
 type TCPCheck struct {
@@ -136,6 +136,7 @@ func (cfg *Config) applyDefaults() {
 	}
 
 	for i := range cfg.Checks.HTTP {
+		cfg.Checks.HTTP[i].Method = strings.TrimSpace(cfg.Checks.HTTP[i].Method)
 		if cfg.Checks.HTTP[i].Method == "" {
 			cfg.Checks.HTTP[i].Method = "GET"
 		}
@@ -186,9 +187,25 @@ func (cfg Config) Validate() error {
 		if parsed.Scheme != "http" && parsed.Scheme != "https" {
 			return fmt.Errorf("http check %q must use http or https", check.Name)
 		}
+		if check.Timeout.Duration() <= 0 {
+			return fmt.Errorf("http check %q timeout must be greater than 0", check.Name)
+		}
+		if check.MaxLatency.Duration() < 0 {
+			return fmt.Errorf("http check %q max_latency must not be negative", check.Name)
+		}
 		for _, status := range check.ExpectedStatus {
 			if status < 100 || status > 599 {
 				return fmt.Errorf("http check %q has invalid expected status %d", check.Name, status)
+			}
+		}
+		for key := range check.Headers {
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("http check %q has an empty request header name", check.Name)
+			}
+		}
+		for key := range check.ExpectedHeaders {
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("http check %q has an empty expected header name", check.Name)
 			}
 		}
 	}
@@ -198,6 +215,9 @@ func (cfg Config) Validate() error {
 		}
 		if _, _, err := net.SplitHostPort(check.Address); err != nil {
 			return fmt.Errorf("tcp check %q has invalid address: %w", check.Name, err)
+		}
+		if check.Timeout.Duration() <= 0 {
+			return fmt.Errorf("tcp check %q timeout must be greater than 0", check.Name)
 		}
 	}
 	for _, check := range cfg.Checks.Disk {

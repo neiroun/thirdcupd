@@ -43,14 +43,15 @@ func Build(cfg config.Config) []Checker {
 }
 
 type httpChecker struct {
-	name           string
-	url            string
-	method         string
-	headers        map[string]string
-	timeout        time.Duration
-	expectedStatus map[int]struct{}
-	maxLatency     time.Duration
-	client         *http.Client
+	name            string
+	url             string
+	method          string
+	headers         map[string]string
+	expectedHeaders map[string]string
+	timeout         time.Duration
+	expectedStatus  map[int]struct{}
+	maxLatency      time.Duration
+	client          *http.Client
 }
 
 func newHTTPChecker(cfg config.HTTPCheck) Checker {
@@ -60,14 +61,15 @@ func newHTTPChecker(cfg config.HTTPCheck) Checker {
 	}
 	timeout := cfg.Timeout.Duration()
 	return &httpChecker{
-		name:           cfg.Name,
-		url:            cfg.URL,
-		method:         cfg.Method,
-		headers:        cfg.Headers,
-		timeout:        timeout,
-		expectedStatus: expected,
-		maxLatency:     cfg.MaxLatency.Duration(),
-		client:         &http.Client{Timeout: timeout},
+		name:            cfg.Name,
+		url:             cfg.URL,
+		method:          cfg.Method,
+		headers:         cfg.Headers,
+		expectedHeaders: cfg.ExpectedHeaders,
+		timeout:         timeout,
+		expectedStatus:  expected,
+		maxLatency:      cfg.MaxLatency.Duration(),
+		client:          &http.Client{Timeout: timeout},
 	}
 }
 
@@ -99,12 +101,25 @@ func (c *httpChecker) Check(ctx context.Context) Result {
 
 	details := map[string]any{
 		"status_code": resp.StatusCode,
+		"method":      c.method,
 		"url":         c.url,
 	}
 	if _, ok := c.expectedStatus[resp.StatusCode]; !ok {
 		return c.result(false, checkedAt, start, fmt.Sprintf("unexpected status code: %d", resp.StatusCode), details)
 	}
-	if c.maxLatency > 0 && time.Since(start) > c.maxLatency {
+
+	for key, expected := range c.expectedHeaders {
+		actual := resp.Header.Get(key)
+		if actual != expected {
+			details["expected_header"] = key
+			details["expected_value"] = expected
+			details["actual_value"] = actual
+			return c.result(false, checkedAt, start, fmt.Sprintf("unexpected response header %s", key), details)
+		}
+	}
+
+	elapsed := time.Since(start)
+	if c.maxLatency > 0 && elapsed > c.maxLatency {
 		return c.result(false, checkedAt, start, fmt.Sprintf("latency is above %s", c.maxLatency), details)
 	}
 	return c.result(true, checkedAt, start, "http check passed", details)
@@ -123,16 +138,19 @@ func (c *httpChecker) result(ok bool, checkedAt, start time.Time, message string
 }
 
 type tcpChecker struct {
-	name    string
-	address string
-	timeout time.Duration
+	name        string
+	address     string
+	timeout     time.Duration
+	dialContext func(context.Context, string, string) (net.Conn, error)
 }
 
 func newTCPChecker(cfg config.TCPCheck) Checker {
+	dialer := net.Dialer{Timeout: cfg.Timeout.Duration()}
 	return &tcpChecker{
-		name:    cfg.Name,
-		address: cfg.Address,
-		timeout: cfg.Timeout.Duration(),
+		name:        cfg.Name,
+		address:     cfg.Address,
+		timeout:     cfg.Timeout.Duration(),
+		dialContext: dialer.DialContext,
 	}
 }
 
@@ -144,11 +162,10 @@ func (c *tcpChecker) Check(ctx context.Context) Result {
 	start := time.Now()
 	checkedAt := start.UTC()
 
-	dialer := net.Dialer{Timeout: c.timeout}
 	checkCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	conn, err := dialer.DialContext(checkCtx, "tcp", c.address)
+	conn, err := c.dialContext(checkCtx, "tcp", c.address)
 	if err != nil {
 		return Result{
 			Name:      c.name,

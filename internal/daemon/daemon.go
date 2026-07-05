@@ -25,7 +25,7 @@ type Daemon struct {
 }
 
 func New(cfg config.Config) (*Daemon, error) {
-	writer, err := events.New(cfg.Observability.EventLog, cfg.Observability.PrettyLogs)
+	writer, err := events.New(cfg.Observability.EventLog)
 	if err != nil {
 		return nil, err
 	}

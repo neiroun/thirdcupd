@@ -14,10 +14,9 @@ import (
 )
 
 type Writer struct {
-	mu     sync.Mutex
-	out    io.Writer
-	file   *os.File
-	pretty bool
+	mu   sync.Mutex
+	out  io.Writer
+	file *os.File
 }
 
 type Event struct {
@@ -33,10 +32,9 @@ type Event struct {
 	Details        map[string]any `json:"details,omitempty"`
 }
 
-func New(path string, pretty bool) (*Writer, error) {
+func New(path string) (*Writer, error) {
 	writer := &Writer{
-		out:    os.Stdout,
-		pretty: pretty,
+		out: os.Stdout,
 	}
 	if path == "" {
 		return writer, nil
@@ -67,15 +65,7 @@ func (w *Writer) Write(result checks.Result, update state.Update) error {
 		Details:        result.Details,
 	}
 
-	var (
-		data []byte
-		err  error
-	)
-	if w.pretty {
-		data, err = json.MarshalIndent(event, "", "  ")
-	} else {
-		data, err = json.Marshal(event)
-	}
+	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}

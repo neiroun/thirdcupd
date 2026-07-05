@@ -55,11 +55,12 @@ type Snapshot struct {
 }
 
 type Totals struct {
-	Checks    int `json:"checks"`
-	Healthy   int `json:"healthy"`
-	Degraded  int `json:"degraded"`
-	Unhealthy int `json:"unhealthy"`
-	Unknown   int `json:"unknown"`
+	Checks     int `json:"checks"`
+	Healthy    int `json:"healthy"`
+	Recovering int `json:"recovering"`
+	Degraded   int `json:"degraded"`
+	Unhealthy  int `json:"unhealthy"`
+	Unknown    int `json:"unknown"`
 }
 
 func New(failureThreshold, successThreshold int) *Store {
@@ -139,6 +140,8 @@ func (s *Store) Snapshot() Snapshot {
 		switch item.Status {
 		case StatusHealthy:
 			totals.Healthy++
+		case StatusRecovering:
+			totals.Recovering++
 		case StatusUnhealthy:
 			totals.Unhealthy++
 		case StatusUnknown:
@@ -169,6 +172,9 @@ func overall(totals Totals) string {
 	}
 	if totals.Unhealthy > 0 {
 		return StatusUnhealthy
+	}
+	if totals.Recovering > 0 {
+		return StatusRecovering
 	}
 	if totals.Degraded > 0 {
 		return StatusDegraded

@@ -1,26 +1,20 @@
 # thirdcupd
 
-`thirdcupd` is a lightweight Go daemon for backend developers who prefer clarity over guesswork when debugging.
+[![CI](https://github.com/neiroun/thirdcupd/actions/workflows/ci.yml/badge.svg)](https://github.com/neiroun/thirdcupd/actions/workflows/ci.yml)
 
-It monitors HTTP endpoints, TCP ports, and disk usage, writing events in JSONL format and exposing `/healthz`, `/status`, and Prometheus-compatible `/metrics`. The core idea: even after the third cup of coffee, you should still understand exactly what broke, when, and why.
+`thirdcupd` is a small Go watchdog for backend services. It runs HTTP, TCP, and disk checks, writes JSONL events, and exposes health/status/metrics endpoints for systemd, Docker, Kubernetes-style probes, CI smoke tests, and simple local operations.
 
-```text
-┌──────────────┐      ┌──────────────┐      ┌──────────────┐
-│ HTTP checks  │ ---> │  thirdcupd   │ ---> │ JSONL events │
-│ TCP checks   │      │  watchdog    │      │ /metrics     │
-│ Disk checks  │      │              │      │ /status      │
-└──────────────┘      └──────────────┘      └──────────────┘
-```
+Current release: **v0.1.0**.
 
 ## Features
 
-- **HTTP checks**: status codes, latency, timeout, headers.
-- **TCP checks**: reachability of PostgreSQL, Redis, API gateways, or any port.
-- **Disk checks**: usage percentage for specified mount points.
-- **Failure thresholds**: `failure_threshold` prevents flapping due to transient network issues.
-- **Structured logging**: writes clear JSONL events to stdout and file.
-- **Health API**: exposes `/healthz`, `/readyz`, `/status`, and `/metrics`.
-- **Flexible runtime**: works with systemd, Docker, or as a one-off smoke test with `-once`.
+- **HTTP checks**: expected status codes, request headers, expected response headers, timeout, and max latency.
+- **TCP checks**: reachability of PostgreSQL, Redis, API gateways, or any `host:port`.
+- **Disk checks**: usage percentage for specified paths and mount points.
+- **Failure thresholds**: `failure_threshold` avoids probe flapping on transient failures; `success_threshold` avoids premature recovery.
+- **Structured logging**: JSONL events to stdout and, optionally, an append-only file.
+- **Health API**: `/healthz`, `/readyz`, `/status`, and Prometheus-compatible `/metrics`.
+- **Flexible runtime**: systemd service, Docker image, or one-off smoke test with `-once`.
 
 ## Quick Start
 
@@ -30,7 +24,7 @@ make build
 ./bin/thirdcupd -config configs/thirdcupd.example.json
 ```
 
-Check the status:
+In another terminal:
 
 ```bash
 curl http://127.0.0.1:8374/healthz
@@ -38,7 +32,7 @@ curl http://127.0.0.1:8374/status
 curl http://127.0.0.1:8374/metrics
 ```
 
-One-off run for CI or deployment hooks:
+One-off smoke test mode:
 
 ```bash
 ./bin/thirdcupd -config configs/thirdcupd.example.json -once
@@ -48,13 +42,13 @@ Exit codes:
 
 | Code | Meaning |
 | --- | --- |
-| `0` | all checks healthy |
-| `1` | configuration error or runtime error |
-| `2` | at least one check unhealthy in `-once` mode |
+| `0` | all checks are healthy |
+| `1` | configuration or runtime error |
+| `2` | at least one check failed in `-once` mode |
 
 ## Configuration
 
-A minimal example is available in `configs/thirdcupd.example.json`.
+The smoke-safe default example is `configs/thirdcupd.example.json`. A fuller reference with HTTP, TCP, disk, file logging, and response-header checks is available at `configs/thirdcupd.full.example.json`.
 
 ```json
 {
@@ -65,10 +59,32 @@ A minimal example is available in `configs/thirdcupd.example.json`.
   },
   "observability": {
     "listen_addr": "127.0.0.1:8374",
-    "event_log": "./thirdcupd.events.jsonl",
-    "pretty_logs": false
+    "event_log": ""
   },
   "checks": {
+    "http": [
+      {
+        "name": "auth-gateway",
+        "url": "http://127.0.0.1:8080/healthz",
+        "method": "GET",
+        "headers": {
+          "User-Agent": "thirdcupd"
+        },
+        "expected_headers": {
+          "X-Service-Health": "green"
+        },
+        "timeout": "3s",
+        "expected_status": [200],
+        "max_latency": "500ms"
+      }
+    ],
+    "tcp": [
+      {
+        "name": "postgres",
+        "address": "127.0.0.1:5432",
+        "timeout": "2s"
+      }
+    ],
     "disk": [
       {
         "name": "root-disk",
@@ -80,83 +96,66 @@ A minimal example is available in `configs/thirdcupd.example.json`.
 }
 ```
 
-Add an HTTP check:
-
-```json
-{
-  "name": "auth-gateway",
-  "url": "http://127.0.0.1:8080/healthz",
-  "method": "GET",
-  "timeout": "3s",
-  "expected_status": [200],
-  "max_latency": "500ms",
-  "headers": {
-    "User-Agent": "thirdcupd"
-  }
-}
-```
-
-Add a TCP check:
-
-```json
-{
-  "name": "postgres",
-  "address": "127.0.0.1:5432",
-  "timeout": "2s"
-}
-```
-
-The `checks` field can contain multiple groups:
-
-```json
-{
-  "checks": {
-    "http": [],
-    "tcp": [],
-    "disk": []
-  }
-}
-```
-
-## API Endpoints
+## Health API
 
 | Endpoint | Response |
 | --- | --- |
-| `/healthz` | `200 ok` if all checks are healthy, otherwise `503` |
-| `/readyz` | same behavior, useful for Kubernetes probes |
-| `/status` | full JSON snapshot of current state |
+| `/healthz` | `200` for `healthy` or pre-threshold `degraded`; `503` for `unknown`, `recovering`, or `unhealthy` |
+| `/readyz` | same behavior as `/healthz` |
+| `/status` | full JSON snapshot with check state, counters, transitions, and details |
 | `/metrics` | Prometheus text format metrics |
 
-Example event:
+Status model:
+
+- `degraded`: a failure was observed, but `failure_threshold` has not been reached yet.
+- `unhealthy`: consecutive failures reached `failure_threshold`.
+- `recovering`: checks have started passing after an unhealthy state, but `success_threshold` has not been reached yet.
+
+Example JSONL event:
 
 ```json
-{
-  "time": "2026-07-03T16:45:00Z",
-  "name": "root-disk",
-  "type": "disk",
-  "ok": true,
-  "status": "healthy",
-  "transition": true,
-  "message": "disk usage 64.21%",
-  "latency_ms": 0
-}
+{"time":"2026-07-05T08:00:00Z","name":"root-disk","type":"disk","ok":true,"status":"healthy","previous_status":"unknown","transition":true,"message":"disk usage 64.21%","latency_ms":0}
+```
+
+## Docker
+
+The image includes a default container-safe config at `/etc/thirdcupd/thirdcupd.json`.
+
+```bash
+docker build -t thirdcupd:0.1.0 .
+docker run --rm -p 8374:8374 thirdcupd:0.1.0
+```
+
+Use a custom config when checking host or compose-network services:
+
+```bash
+docker run --rm \
+  -p 8374:8374 \
+  -v "$PWD/configs/thirdcupd.docker.json:/etc/thirdcupd/thirdcupd.json:ro" \
+  thirdcupd:0.1.0
 ```
 
 ## systemd
 
-Build and install the binary:
+Build and install:
 
 ```bash
 make build
 sudo install -m 0755 bin/thirdcupd /usr/local/bin/thirdcupd
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin thirdcupd
 sudo mkdir -p /etc/thirdcupd
 sudo cp configs/thirdcupd.example.json /etc/thirdcupd/thirdcupd.json
 ```
 
-Create a dedicated user and enable the service:
+For file logging under systemd, set:
+
+```json
+"event_log": "/var/log/thirdcupd/events.jsonl"
+```
+
+Enable the service:
 
 ```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin thirdcupd
 sudo cp systemd/thirdcupd.service /etc/systemd/system/thirdcupd.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now thirdcupd
@@ -169,40 +168,25 @@ systemctl status thirdcupd
 journalctl -u thirdcupd -f
 ```
 
-## Docker
+## Development
 
 ```bash
-docker build -t thirdcupd .
-docker run --rm \
-  -p 8374:8374 \
-  -v "$PWD/configs/thirdcupd.example.json:/etc/thirdcupd/thirdcupd.json:ro" \
-  thirdcupd -config /etc/thirdcupd/thirdcupd.json
+make fmt
+make test
+make build
 ```
 
-To check host services from within the container, use addresses accessible from the Docker network.
-
-## Project Structure
+Project layout:
 
 ```text
-cmd/thirdcupd         entrypoint
-internal/config       configuration loading and validation
-internal/checks       HTTP, TCP, and disk check implementations
-internal/state        state management, thresholds, transitions
+cmd/thirdcupd         CLI entrypoint
+internal/config       config loading, defaults, validation
+internal/checks       HTTP, TCP, and disk checks
+internal/state        thresholds, transitions, snapshots
 internal/events       JSONL event logging
-internal/server       health/status/metrics HTTP API
-configs               example configuration files
-systemd               systemd unit file for Linux
+internal/server       health, status, and metrics API
+configs               runtime examples
+systemd               Linux service unit
 ```
 
-## Philosophy
-
-`thirdcupd` is not meant to replace Prometheus, Grafana, or a full-fledged incident management platform. It's a small daemon for projects that need a simple, predictable watchdog right next to their backend service:
-
-- minimal dependencies;
-- meaningful errors;
-- readable code;
-- predictable startup;
-- logs and metrics out of the box.
-
-For minimalism, but not emptiness.
-```
+`thirdcupd` is intentionally small: no scheduler dependency, no database, and no external services required to run.

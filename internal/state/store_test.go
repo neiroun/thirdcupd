@@ -26,6 +26,28 @@ func TestStoreThresholds(t *testing.T) {
 	}
 }
 
+func TestStoreRecoveryThreshold(t *testing.T) {
+	store := New(1, 2)
+
+	failed := store.Apply(result(false))
+	if failed.State.Status != StatusUnhealthy {
+		t.Fatalf("expected unhealthy after failure, got %s", failed.State.Status)
+	}
+
+	firstSuccess := store.Apply(result(true))
+	if firstSuccess.State.Status != StatusRecovering {
+		t.Fatalf("expected recovering after first success, got %s", firstSuccess.State.Status)
+	}
+	if got := store.Snapshot().Overall; got != StatusRecovering {
+		t.Fatalf("expected overall recovering, got %s", got)
+	}
+
+	secondSuccess := store.Apply(result(true))
+	if secondSuccess.State.Status != StatusHealthy {
+		t.Fatalf("expected healthy after second success, got %s", secondSuccess.State.Status)
+	}
+}
+
 func result(ok bool) checks.Result {
 	return checks.Result{
 		Name:      "api",
