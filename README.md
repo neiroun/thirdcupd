@@ -6,15 +6,17 @@
 
 Current release: **v0.1.0**.
 
-## Features
+## Changelog
 
-- **HTTP checks**: expected status codes, request headers, expected response headers, timeout, and max latency.
-- **TCP checks**: reachability of PostgreSQL, Redis, API gateways, or any `host:port`.
-- **Disk checks**: usage percentage for specified paths and mount points.
-- **Failure thresholds**: `failure_threshold` avoids probe flapping on transient failures; `success_threshold` avoids premature recovery.
-- **Structured logging**: JSONL events to stdout and, optionally, an append-only file.
-- **Health API**: `/healthz`, `/readyz`, `/status`, and Prometheus-compatible `/metrics`.
-- **Flexible runtime**: systemd service, Docker image, or one-off smoke test with `-once`.
+### 0.1.0 - 2026-07-05
+
+- Added HTTP checks with expected status codes, request headers, expected response headers, timeout, and max latency.
+- Added TCP reachability checks for arbitrary host:port targets.
+- Added disk usage checks for configured paths and mount points.
+- Added failure and recovery thresholds to reduce noisy status transitions.
+- Added JSONL event logging to stdout and optional files.
+- Added `/healthz`, `/readyz`, `/status`, and Prometheus-compatible `/metrics`.
+- Added one-off smoke test mode with `-once`, Docker runtime support, and a systemd unit.
 
 ## Quick Start
 
